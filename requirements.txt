@@ -1,16 +1,5 @@
-# Streamlit & basic dependencies
 streamlit==1.26.0
-rich>=14.2.0
-
-# PDF handling
+rich>=10.14.0,<14
 pdfplumber>=0.11.9
-
-# Transformers & NLP
-transformers>=4.34.0
-torch>=2.2.0
-
-# Optional utilities (if needed in your code)
-pillow>=10.1.0
-
-
+pillow>=9.0.0,<10
 
