@@ -1,26 +1,15 @@
 import streamlit as st
+import pdfplumber
 
 # ================= CONFIG =================
 st.set_page_config(page_title="Sudan Crisis Chatbot", layout="wide")
-st.markdown(
-    """
-    <style>
-    .stApp {
-        background-color: black;
-        color: red;
-    }
-    .stTextInput>div>div>input {
-        color: red;
-        background-color: black;
-    }
-    .stButton>button {
-        background-color: red;
-        color: black;
-        border: 2px solid black;
-    }
-    </style>
-    """, unsafe_allow_html=True
-)
+st.markdown("""
+<style>
+.stApp {background-color: black; color: red;}
+.stTextInput>div>div>input {color: red; background-color: black;}
+.stButton>button {background-color: red; color: black; border: 2px solid black;}
+</style>
+""", unsafe_allow_html=True)
 
 # ================= INTENTS & RESPONSES =================
 intents = {
@@ -80,9 +69,20 @@ def detect_lang(text):
     return "english"
 
 # ================= CHAT FUNCTION =================
-def get_answer(user_q, user_name="Rafay"):
+def get_answer(user_q, user_name="Rafay", pdf_text=None):
     q = user_q.lower()
     lang = detect_lang(user_q)
+
+    # Check PDF first
+    if pdf_text:
+        if any(k in pdf_text.lower() for keys in intents.values() for k in keys):
+            # Simple: return first matched intent answer
+            for intent, keys in intents.items():
+                if any(k in pdf_text.lower() for k in keys):
+                    ans = responses[intent][lang]
+                    return f"{user_name}: {user_q}", f"Bot (from PDF): {ans}"
+
+    # Otherwise normal intents
     for intent, keys in intents.items():
         if any(k in q for k in keys):
             ans = responses[intent][lang]
@@ -91,6 +91,7 @@ def get_answer(user_q, user_name="Rafay"):
             else:
                 used_answers.add(ans)
             return f"{user_name}: {user_q}", f"Bot: {ans}"
+
     return f"{user_name}: {user_q}", "Bot: Sorry, I’m under training."
 
 # ================= SESSION =================
@@ -101,19 +102,29 @@ if "history" not in st.session_state:
 st.title("🌍 Sudan Crisis Chatbot")
 st.markdown("Developed by Rafay Boss")
 
+# ================= PDF UPLOAD =================
+uploaded_file = st.file_uploader("Upload a PDF to get answers", type="pdf")
+pdf_text = None
+if uploaded_file:
+    with pdfplumber.open(uploaded_file) as pdf:
+        pdf_text = ""
+        for page in pdf.pages:
+            pdf_text += page.extract_text() + "\n"
+    st.success("PDF loaded successfully!")
+
 # Suggested questions
 st.markdown("**Suggested Questions:**")
 cols = st.columns(3)
 suggestions = [v[0] for v in intents.values()]
 for i, q in enumerate(suggestions):
     if cols[i % 3].button(q):
-        user_msg, bot_msg = get_answer(q)
+        user_msg, bot_msg = get_answer(q, pdf_text=pdf_text)
         st.session_state.history.append((user_msg, bot_msg))
 
 # User input
 user_input = st.text_input("Ask in English / Roman Urdu / اردو")
 if user_input:
-    user_msg, bot_msg = get_answer(user_input)
+    user_msg, bot_msg = get_answer(user_input, pdf_text=pdf_text)
     st.session_state.history.append((user_msg, bot_msg))
 
 # Display chat
