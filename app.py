@@ -1,149 +1,122 @@
-import gradio as gr
-import pdfplumber
-import re
-from transformers import pipeline
-import requests  # for web fetch
-import os
+import streamlit as st
 
-# ================= MODELS =================
-qa_model = pipeline("question-answering", model="distilbert-base-uncased-distilled-squad")
-rewriter = pipeline("text2text-generation", model="facebook/bart-large-cnn")
+# ================= CONFIG =================
+st.set_page_config(page_title="Sudan Crisis Chatbot", layout="wide")
+st.markdown(
+    """
+    <style>
+    .stApp {
+        background-color: black;
+        color: red;
+    }
+    .stTextInput>div>div>input {
+        color: red;
+        background-color: black;
+    }
+    .stButton>button {
+        background-color: red;
+        color: black;
+        border: 2px solid black;
+    }
+    </style>
+    """, unsafe_allow_html=True
+)
 
-# ================= PDF =================
-PDF_PATH = "Sudan_crises_updated.pdf"
+# ================= INTENTS & RESPONSES =================
+intents = {
+    "independence": ["sudan azad kaise hua", "1956", "anglo egyptian", "egypt monarchy 1952", "sudanization 1953", "1 january 1956", "azad kb hua"],
+    "divide": ["sudan break", "tootna", "north south divide", "culture religion", "north muslim", "south christian", "discrimination"],
+    "first_civil_war": ["first civil war", "pehli jang", "1955 1972", "anya nya", "rebellion"],
+    "force_rule": ["force rule", "zulm", "military control", "culture thopi", "promises toda"],
+    "sharia_law": ["sharia law", "september laws", "nimeiri", "1983 sharia"],
+    "second_civil_war": ["second civil war", "doosri jang", "1983 2005", "john garang", "spla"],
+    "addis_ababa": ["addis ababa", "1972 agreement", "south autonomy"],
+    "south_sudan_independence": ["south sudan azad", "2011 independence"],
+    "rsf": ["rsf", "rapid support forces", "janjaweed"],
+    "current": ["current", "abhi", "rsf saf war", "famine", "genocide"]
+}
 
-def load_pdf(path):
-    text = ""
-    try:
-        with pdfplumber.open(path) as pdf:
-            for p in pdf.pages:
-                t = p.extract_text()
-                if t:
-                    text += re.sub(r"\n+", "\n", t) + "\n"
-        return text.lower()
-    except:
-        return ""
+responses = {
+    "independence": {"english":"Sudan gained independence on 1 January 1956 from Anglo-Egyptian control without a major war.",
+                     "roman":"Sudan 1 January 1956 ko Anglo-Egyptian control se azad hua bina bari jang ke.",
+                     "urdu":"سوڈان یکم جنوری 1956 کو اینگلو-مصری کنٹرول سے آزاد ہوا۔"},
+    "divide": {"english":"Sudan divided due to cultural and religious differences between North and South.",
+               "roman":"Sudan North aur South ke culture aur religion ke farq ki wajah se divide hua.",
+               "urdu":"سوڈان شمال اور جنوب کے ثقافتی و مذہبی اختلافات کی وجہ سے تقسیم ہوا۔"},
+    "first_civil_war":{"english":"First Civil War (1955-1972) started due to fear of Northern domination.",
+                       "roman":"Pehli civil war 1955-1972 North ke domination ke khauf ki wajah se hui.",
+                       "urdu":"پہلی خانہ جنگی 1955-1972 شمالی غلبے کے خوف سے شروع ہوئی۔"},
+    "force_rule":{"english":"South Sudan felt forced rule due to lack of political power and military control.",
+                  "roman":"South ne force rule mehsoos ki kyun ke political power nahi thi aur military control tha.",
+                  "urdu":"جنوبی سوڈان کو زبردستی حکمرانی کا سامنا کرنا پڑا۔"},
+    "sharia_law":{"english":"Sharia Law was imposed in 1983 by Nimeiri, escalating conflict.",
+                  "roman":"1983 mein Nimeiri ne Sharia Law lagaya jis se jang barh gayi.",
+                  "urdu":"1983 میں نمیری نے شریعت نافذ کی جس سے تنازعہ بڑھا۔"},
+    "second_civil_war":{"english":"Second Civil War (1983-2005) was led by SPLA under John Garang.",
+                        "roman":"Doosri civil war 1983-2005 John Garang aur SPLA ne lead ki.",
+                        "urdu":"دوسری خانہ جنگی 1983-2005 جان گارانگ کی قیادت میں ہوئی۔"},
+    "addis_ababa":{"english":"Addis Ababa Agreement (1972) ended the first civil war.",
+                    "roman":"Addis Ababa Agreement 1972 ne pehli jang khatam ki.",
+                    "urdu":"ایڈس ابابا معاہدہ 1972 نے پہلی جنگ ختم کی۔"},
+    "south_sudan_independence":{"english":"South Sudan became independent on 9 July 2011.",
+                                "roman":"South Sudan 9 July 2011 ko azad hua.",
+                                "urdu":"جنوبی سوڈان 9 جولائی 2011 کو آزاد ہوا۔"},
+    "rsf":{"english":"RSF was formed in 2013 from Janjaweed militias.",
+           "roman":"RSF 2013 mein Janjaweed se bani.",
+           "urdu":"آر ایس ایف 2013 میں جنجوید سے بنی۔"},
+    "current":{"english":"Sudan is facing RSF vs SAF conflict since 2023.",
+             "roman":"Sudan 2023 se RSF aur SAF ki jang ka shikar hai.",
+             "urdu":"سوڈان 2023 سے آر ایس ایف اور ایس اے ایف کی جنگ کا شکار ہے۔"}
+}
 
-pdf_text = load_pdf(PDF_PATH)
+used_answers = set()
 
 # ================= LANGUAGE DETECTION =================
-def detect_lang(q):
-    if any('\u0600' <= c <= '\u06FF' for c in q):
+def detect_lang(text):
+    if any('\u0600' <= c <= '\u06FF' for c in text):
         return "urdu"
-    roman = ["kya","kab","ka","ki","ke","hai","kyun"]
-    if any(w in q.lower() for w in roman):
+    if text.lower() == text:
         return "roman"
     return "english"
 
-# ================= QUESTION REWRITE =================
-def rewrite(q):
-    return rewriter(f"Rewrite this Sudan related question clearly:\n{q}",
-                    max_length=50, do_sample=False)[0]["generated_text"]
-
-# ================= ANSWER ENGINE =================
-def answer(q, context_text):
-    clean_q = rewrite(q)
-    result = qa_model(question=clean_q, context=context_text)
-    if result["score"] < 0.25:
-        return None
-    main_answer = result["answer"]
-    sentences = context_text.split(".")
-    related = [s.strip() for s in sentences if main_answer.lower() in s][:3]
-    return main_answer, related
-
-# ================= WEB SEARCH (optional) =================
-# Replace "YOUR_SERPAPI_KEY" with your SerpAPI key if you want web fetch
-SERPAPI_KEY = os.environ.get("SERPAPI_KEY")  # store in Hugging Face Secrets
-
-def web_fetch(query):
-    if not SERPAPI_KEY:
-        return "Answer not found in PDF and Web fetch not configured."
-    try:
-        url = f"https://serpapi.com/search.json?q={query}&api_key={SERPAPI_KEY}"
-        r = requests.get(url, timeout=5).json()
-        snippets = []
-        if "organic_results" in r:
-            for item in r["organic_results"][:3]:
-                snippets.append(item.get("snippet",""))
-        return "\n".join(snippets) if snippets else "No relevant info found online."
-    except:
-        return "Error fetching from web."
-
-# ================= AUTO SUGGESTIONS =================
-def auto_questions(context_text):
-    qs = []
-    for line in context_text.split("\n"):
-        if len(line) > 80 and "?" not in line:
-            qs.append("Why " + line[:60] + "?")
-    return list(dict.fromkeys(qs))[:6]
-
-suggestions = auto_questions(pdf_text)
-
 # ================= CHAT FUNCTION =================
-chat_history = []
-
-def chatbot_fn(user_q, pdf_file=None):
-    global chat_history
-    chat_history = []  # clear previous chat for new question
-    
-    context_text = load_pdf(pdf_file.name) if pdf_file else pdf_text
-
+def get_answer(user_q, user_name="Rafay"):
+    q = user_q.lower()
     lang = detect_lang(user_q)
-    res = answer(user_q, context_text)
-    
-    if not res:
-        # Try web fetch if PDF fails
-        reply = web_fetch(user_q)
-    else:
-        main, related = res
-        reply = f"**Answer:** {main}"
-        if related:
-            reply += "\n\n**Related facts:**"
-            for r in related:
-                reply += f"\n• {r.strip()}."
+    for intent, keys in intents.items():
+        if any(k in q for k in keys):
+            ans = responses[intent][lang]
+            if ans in used_answers:
+                ans = "Sorry, I’m under training."
+            else:
+                used_answers.add(ans)
+            return f"{user_name}: {user_q}", f"Bot: {ans}"
+    return f"{user_name}: {user_q}", "Bot: Sorry, I’m under training."
 
-    chat_history.append(("User", user_q))
-    chat_history.append(("Bot", reply))
+# ================= SESSION =================
+if "history" not in st.session_state:
+    st.session_state.history = []
 
-    formatted = ""
-    for role, text in chat_history:
-        color = "#ff4c4c" if role=="User" else "#ffd6d6"
-        align = "right" if role=="User" else "left"
-        formatted += f"<div style='background:{'#1a0000' if role=='User' else '#330000'}; color:{color}; padding:10px; border-radius:10px; margin:5px 0; text-align:{align};'>{text}</div>"
-    
-    return formatted
+# ================= UI =================
+st.title("🌍 Sudan Crisis Chatbot")
+st.markdown("Developed by Rafay Boss")
 
-# ================= GRADIO UI =================
-chat_history = []
+# Suggested questions
+st.markdown("**Suggested Questions:**")
+cols = st.columns(3)
+suggestions = [v[0] for v in intents.values()]
+for i, q in enumerate(suggestions):
+    if cols[i % 3].button(q):
+        user_msg, bot_msg = get_answer(q)
+        st.session_state.history.append((user_msg, bot_msg))
 
-with gr.Blocks(css="""
-body { background-color: #0b0c10; color: #f5f5f5; font-family: 'Orbitron', 'Noto Nastaliq Urdu', sans-serif; }
-.gr-button { background-color: red; color: black; border-radius:8px; }
-.gr-textbox { background-color:#222; color:red; border:1px solid red; }
-.gr-file { background-color:#222; color:red; border:1px solid red; }
-""") as demo:
-    gr.Markdown("<h2 style='color:red; text-align:center;'>🌍 Sudan Crisis AI - Mafia Style</h2>")
-    
-    with gr.Row():
-        with gr.Column():
-            user_input = gr.Textbox(label="Ask about Sudan crisis:", placeholder="English, Urdu, or Roman Urdu")
-            pdf_file = gr.File(label="Upload PDF (optional)", file_types=[".pdf"])
-            submit = gr.Button("Send")
-            
-            gr.Markdown("### 🔎 Suggested Questions")
-            suggestion_buttons = []
-            for q in suggestions:
-                btn = gr.Button(q)
-                suggestion_buttons.append(btn)
-                
-        with gr.Column():
-            output = gr.HTML(label="Chat Output")
-    
-    # Connect submit button
-    submit.click(fn=chatbot_fn, inputs=[user_input, pdf_file], outputs=[output])
-    
-    # Connect suggested question buttons
-    for btn, q in zip(suggestion_buttons, suggestions):
-        btn.click(fn=chatbot_fn, inputs=[gr.State(q), pdf_file], outputs=[output])
+# User input
+user_input = st.text_input("Ask in English / Roman Urdu / اردو")
+if user_input:
+    user_msg, bot_msg = get_answer(user_input)
+    st.session_state.history.append((user_msg, bot_msg))
 
-demo.launch()
+# Display chat
+for u, b in st.session_state.history:
+    st.markdown(f"**{u}**")
+    st.markdown(f"{b}")
